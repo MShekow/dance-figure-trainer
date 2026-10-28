@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Dance figures</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; color: #000;
+    font-family: "DejaVu Sans", system-ui, sans-serif; overflow: hidden;
+    -webkit-tap-highlight-color: transparent; user-select: none; }
+  #stage { position: fixed; top: 0; left: 0; right: 0; height: 50%;
+    display: flex; flex-direction: column; }
+  .figure { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-weight: bold; padding: 0 4%; overflow: hidden; overflow-wrap: anywhere; }
+  .figure > span { display: block; max-width: 100%; }
+  .sep { flex: 0 0 3px; background: #000; margin: 0 8%; }
+  #bar { position: fixed; bottom: calc(8px + env(safe-area-inset-bottom)); left: 50%;
+    transform: translateX(-50%); display: flex; gap: 10px; }
+  #bar button { font-size: 14px; padding: 6px 14px; border: 1px solid #999;
+    border-radius: 6px; background: #f4f4f4; color: #333; }
+  dialog { border: 1px solid #666; border-radius: 10px; padding: 20px; font-size: 18px; }
+  dialog select, dialog input, dialog button { font-size: 18px; padding: 6px; margin-top: 10px; }
+  .stepper { display: flex; gap: 6px; align-items: center; }
+  .stepper input { flex: 1; min-width: 0; text-align: center; }
+  .stepper button { min-width: 44px; }
+  dialog label { display: block; margin-top: 10px; }
+  dialog textarea { width: 100%; box-sizing: border-box; font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="bar">
+  <button id="resetFigsBtn" type="button">↺ Reset</button>
+  <button id="settingsBtn" type="button">⚙ Settings</button>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <label for="count">Figures at once</label>
+    <select id="count">
+      <option value="1">One</option>
+      <option value="2">Two</option>
+    </select>
+    <label for="maxFont">Max font size (px)</label>
+    <div class="stepper">
+      <button type="button" id="fontMinus" aria-label="Decrease">−</button>
+      <input id="maxFont" type="number" inputmode="numeric" min="10" max="1000" step="10">
+      <button type="button" id="fontPlus" aria-label="Increase">+</button>
+    </div>
+    <label for="list">Figures (one per line)</label>
+    <textarea id="list" rows="10"></textarea>
+    <div><button type="button" id="resetBtn">Reset list</button> <button value="close">Close</button></div>
+  </form>
+</dialog>
+
+<script>
+const DEFAULT_FIGURES = ["1/2 left spin", "1/2 right spin", "Left turn", "Right turn", "Kick ball change", "Susie q",
+  "Rhombus", "Zeta", "Crosses forward", "Cross over", "Mambo", "Cross-step Susie Q", "Braid", "Fence",
+  "Grapevine"];
+const DEFAULT_MAX_FONT_PX = 140;
+
+const stage = document.getElementById("stage");
+const dlg = document.getElementById("dlg");
+const countSel = document.getElementById("count");
+let count = parseInt(localStorage.getItem("count"), 10) === 2 ? 2 : 1;
+function loadFigures() {
+  try {
+    const l = JSON.parse(localStorage.getItem("figures"));
+    if (Array.isArray(l) && l.length) return l;
+  } catch (e) {}
+  return DEFAULT_FIGURES.slice();
+}
+let figures = loadFigures();
+let maxFont = parseInt(localStorage.getItem("maxFont"), 10) || DEFAULT_MAX_FONT_PX;
+let pool = [];
+let shown = [];
+
+function draw(avoid) {
+  if (pool.length === 0) {
+    pool = figures.slice();
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    if (pool.length > 1) {
+      for (let i = pool.length - 1; i >= 0; i--) {
+        if (!avoid.includes(pool[i])) {
+          [pool[i], pool[pool.length - 1]] = [pool[pool.length - 1], pool[i]];
+          break;
+        }
+      }
+    }
+  }
+  return pool.pop();
+}
+
+function next() {
+  shown = [];
+  for (let i = 0; i < count; i++) shown.push(draw(shown));
+  render();
+}
+
+function render() {
+  stage.replaceChildren();
+  const items = shown.length === count ? shown : Array(count).fill("");
+  if (shown.length === 0) items[0] = "→";
+  items.forEach((text, i) => {
+    if (i) { const s = document.createElement("div"); s.className = "sep"; stage.append(s); }
+    const f = document.createElement("div");
+    f.className = "figure";
+    const span = document.createElement("span");
+    span.textContent = text;
+    f.append(span);
+    stage.append(f);
+  });
+  fit();
+}
+
+function fit() {
+  const cells = [...stage.querySelectorAll(".figure")];
+  if (!cells.length) return;
+  const fits = px => {
+    cells.forEach(c => c.style.fontSize = px + "px");
+    return cells.every(c => c.scrollHeight <= c.clientHeight && c.scrollWidth <= c.clientWidth);
+  };
+  let lo = 10, hi = Math.max(lo, maxFont);
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid)) lo = mid; else hi = mid - 1;
+  }
+  cells.forEach(c => c.style.fontSize = lo + "px");
+}
+
+document.addEventListener("click", e => {
+  if (e.target.closest("#bar") || e.target.closest("dialog")) return;
+  next();
+});
+document.getElementById("resetFigsBtn").addEventListener("click", () => {
+  pool = [];
+  shown = [];
+  render();
+});
+document.getElementById("settingsBtn").addEventListener("click", () => {
+  countSel.value = String(count);
+  maxFontInput.value = maxFont;
+  listArea.value = figures.join("\n");
+  dlg.showModal();
+});
+const listArea = document.getElementById("list");
+function parseList(text) {
+  const l = text.split("\n").map(x => x.trim()).filter(Boolean);
+  return l.length ? l : DEFAULT_FIGURES.slice();
+}
+document.getElementById("resetBtn").addEventListener("click", () => {
+  listArea.value = DEFAULT_FIGURES.join("\n");
+});
+dlg.addEventListener("close", () => {
+  const l = parseList(listArea.value);
+  if (JSON.stringify(l) === JSON.stringify(figures)) return;
+  figures = l;
+  localStorage.setItem("figures", JSON.stringify(figures));
+  pool = [];
+  shown = [];
+  render();
+});
+const maxFontInput = document.getElementById("maxFont");
+function setMaxFont(v) {
+  maxFont = v >= 10 ? Math.min(v, 1000) : DEFAULT_MAX_FONT_PX;
+  maxFontInput.value = maxFont;
+  localStorage.setItem("maxFont", maxFont);
+  fit();
+}
+maxFontInput.addEventListener("change", () => setMaxFont(parseInt(maxFontInput.value, 10)));
+document.getElementById("fontMinus").addEventListener("click", () => setMaxFont(maxFont - 10));
+document.getElementById("fontPlus").addEventListener("click", () => setMaxFont(maxFont + 10));
+countSel.addEventListener("change", () => {
+  count = parseInt(countSel.value, 10);
+  localStorage.setItem("count", count);
+  shown = [];
+  render();
+});
+window.addEventListener("resize", fit);
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" && !dlg.open) next();
+});
+
+render();
+</script>
+</body>
+</html>
