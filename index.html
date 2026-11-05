@@ -23,6 +23,9 @@
   .stepper { display: flex; gap: 6px; align-items: center; }
   .stepper input { flex: 1; min-width: 0; text-align: center; }
   .stepper button { min-width: 44px; }
+  body { transition: background-color .4s; }
+  body.flash { background: #e8f2ff; }
+  #bar button:disabled { opacity: .4; }
   dialog label { display: block; margin-top: 10px; }
   dialog textarea { width: 100%; box-sizing: border-box; font-size: 16px; }
 </style>
@@ -30,7 +33,8 @@
 <body>
 <div id="stage"></div>
 <div id="bar">
-  <button id="resetFigsBtn" type="button">↺ Reset</button>
+  <button id="resetFigsBtn" type="button">↺ Restart</button>
+  <button id="newSetBtn" type="button">🎲 New set</button>
   <button id="settingsBtn" type="button">⚙ Settings</button>
 </div>
 
@@ -41,6 +45,17 @@
       <option value="1">One</option>
       <option value="2">Two</option>
     </select>
+    <label for="order">Order</label>
+    <select id="order">
+      <option value="random">Random</option>
+      <option value="listed">As listed</option>
+    </select>
+    <label for="subsetN">Figures to use (0 = all)</label>
+    <div class="stepper">
+      <button type="button" id="nMinus" aria-label="Decrease">−</button>
+      <input id="subsetN" type="number" inputmode="numeric" min="0" step="1">
+      <button type="button" id="nPlus" aria-label="Increase">+</button>
+    </div>
     <label for="maxFont">Max font size (px)</label>
     <div class="stepper">
       <button type="button" id="fontMinus" aria-label="Decrease">−</button>
@@ -72,12 +87,54 @@ function loadFigures() {
 }
 let figures = loadFigures();
 let maxFont = parseInt(localStorage.getItem("maxFont"), 10) || DEFAULT_MAX_FONT_PX;
+let order = localStorage.getItem("order") === "listed" ? "listed" : "random";
+let subsetN = Math.max(0, parseInt(localStorage.getItem("subsetN"), 10) || 0);
+const orderSel = document.getElementById("order");
+const subsetInput = document.getElementById("subsetN");
+const newSetBtn = document.getElementById("newSetBtn");
 let pool = [];
 let shown = [];
+let subset = [];
+let pos = 0;
+let started = false;
+
+function flash() {
+  document.body.classList.add("flash");
+  setTimeout(() => document.body.classList.remove("flash"), 400);
+}
+
+function effectiveN() {
+  let n = subsetN === 0 ? figures.length : Math.min(subsetN, figures.length);
+  return Math.min(figures.length, Math.max(n, count));
+}
+
+function restart() {
+  pool = [];
+  pos = 0;
+  shown = [];
+  started = false;
+  render();
+}
+
+function newSet() {
+  const n = effectiveN();
+  if (order === "listed") subset = figures.slice(0, n);
+  else {
+    const idx = figures.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    subset = idx.slice(0, n).sort((a, b) => a - b).map(i => figures[i]);
+  }
+  newSetBtn.disabled = order === "listed" || n === figures.length;
+  restart();
+}
 
 function draw(avoid) {
   if (pool.length === 0) {
-    pool = figures.slice();
+    pool = subset.slice();
+    if (started) flash();
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -95,14 +152,21 @@ function draw(avoid) {
 }
 
 function next() {
-  shown = [];
-  for (let i = 0; i < count; i++) shown.push(draw(shown));
+  if (order === "listed") {
+    if (pos >= subset.length) { pos = 0; flash(); }
+    shown = subset.slice(pos, pos + count);
+    pos += count;
+  } else {
+    shown = [];
+    for (let i = 0; i < count; i++) shown.push(draw(shown));
+  }
+  started = true;
   render();
 }
 
 function render() {
   stage.replaceChildren();
-  const items = shown.length === count ? shown : Array(count).fill("");
+  const items = shown.length ? shown.concat(Array(Math.max(0, count - shown.length)).fill("")) : Array(count).fill("");
   if (shown.length === 0) items[0] = "→";
   items.forEach((text, i) => {
     if (i) { const s = document.createElement("div"); s.className = "sep"; stage.append(s); }
@@ -136,13 +200,14 @@ document.addEventListener("click", e => {
   next();
 });
 document.getElementById("resetFigsBtn").addEventListener("click", () => {
-  pool = [];
-  shown = [];
-  render();
+  restart();
 });
+newSetBtn.addEventListener("click", newSet);
 document.getElementById("settingsBtn").addEventListener("click", () => {
   countSel.value = String(count);
   maxFontInput.value = maxFont;
+  orderSel.value = order;
+  subsetInput.value = subsetN;
   listArea.value = figures.join("\n");
   dlg.showModal();
 });
@@ -156,13 +221,20 @@ document.getElementById("resetBtn").addEventListener("click", () => {
 });
 dlg.addEventListener("close", () => {
   const l = parseList(listArea.value);
-  if (JSON.stringify(l) === JSON.stringify(figures)) return;
+  const n = Math.max(0, parseInt(subsetInput.value, 10) || 0);
+  const changed = JSON.stringify(l) !== JSON.stringify(figures) || n !== subsetN || orderSel.value !== order;
+  if (!changed) return;
   figures = l;
+  subsetN = n;
+  order = orderSel.value;
   localStorage.setItem("figures", JSON.stringify(figures));
-  pool = [];
-  shown = [];
-  render();
+  localStorage.setItem("subsetN", subsetN);
+  localStorage.setItem("order", order);
+  newSet();
 });
+const stepN = d => subsetInput.value = Math.max(0, (parseInt(subsetInput.value, 10) || 0) + d);
+document.getElementById("nMinus").addEventListener("click", () => stepN(-1));
+document.getElementById("nPlus").addEventListener("click", () => stepN(1));
 const maxFontInput = document.getElementById("maxFont");
 function setMaxFont(v) {
   maxFont = v >= 10 ? Math.min(v, 1000) : DEFAULT_MAX_FONT_PX;
@@ -176,15 +248,14 @@ document.getElementById("fontPlus").addEventListener("click", () => setMaxFont(m
 countSel.addEventListener("change", () => {
   count = parseInt(countSel.value, 10);
   localStorage.setItem("count", count);
-  shown = [];
-  render();
+  newSet();
 });
 window.addEventListener("resize", fit);
 document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight" && !dlg.open) next();
 });
 
-render();
+newSet();
 </script>
 </body>
 </html>
